@@ -19,8 +19,8 @@ var (
 )
 
 func init() {
-	flag.StringVar(&Token, "t", "MTA2NzM5MzczMTU3OTM1NTE1OA.GL2-e4.ynYxaHIR_Rz4IPon6HEQpMi5rGE1ScVAMiPZM0", "Bot Token")
-	flag.StringVar(&MainDirectory, "i", "/Users/aerben/GolandProjects/frubot/bot", "Image input path")
+	flag.StringVar(&Token, "t", "", "Bot Token")
+	flag.StringVar(&MainDirectory, "i", "", "Image input path")
 	flag.Parse()
 }
 
