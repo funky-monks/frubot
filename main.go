@@ -1,13 +1,22 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/rekognition"
+	"github.com/aws/aws-sdk-go-v2/service/rekognition/types"
 	"github.com/bwmarrin/discordgo"
+	"github.com/h2non/bimg"
+	"io"
 	"log"
 	"math/rand"
+	"net/http"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"syscall"
 	"time"
@@ -38,8 +47,7 @@ func main() {
 	// Open a websocket connection to Discord and begin listening.
 	err = dg.Open()
 	if err != nil {
-		fmt.Println("error opening connection,", err)
-		return
+		log.Fatal("error opening connection,", err)
 	}
 
 	// Wait here until CTRL-C or other term signal is received.
@@ -52,42 +60,69 @@ func main() {
 	dg.Close()
 }
 
-func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
+func messageCreate(s *discordgo.Session, mc *discordgo.MessageCreate) {
+	m := mc.Message
 	if m.Author.ID == s.State.User.ID {
 		return
 	}
-	var subDirectory = ""
+
+	if m.Content == "&center" {
+		err := center(s, m)
+		if err != nil {
+			s.ChannelMessage(m.ChannelID, "Failed to center image")
+		}
+		return
+	}
+
+	subDirectory := determineSubdirectory(m)
+	if subDirectory != "" {
+		err := sendImage(s, m, subDirectory)
+		if err != nil {
+			s.ChannelMessage(m.ChannelID, "Failed to send image")
+		}
+	}
+	return
+}
+
+func determineSubdirectory(m *discordgo.Message) string {
+	var subDirectory string
 	switch m.Content {
 	case "&john", "&fru":
 		subDirectory = "fru"
-		break
 	case "&tony":
 		subDirectory = "tony"
-		break
 	case "&flea":
 		subDirectory = "flea"
-		break
 	case "&chad":
 		subDirectory = "chad"
-		break
 	case "&josh":
 		subDirectory = "josh"
-		break
 	case "&cornell", "&chris":
 		subDirectory = "chris"
-		break
 	default:
-		return
+		subDirectory = ""
 	}
+	return subDirectory
+}
+
+func sendImage(s *discordgo.Session, m *discordgo.Message, subDirectory string) error {
 	imageDirectory := filepath.Join(MainDirectory, subDirectory)
-	pick := pickRandomFile(imageDirectory)
+	pick, err := pickRandomFile(imageDirectory)
+	if err != nil {
+		return err
+	}
 	file, err := os.Open(filepath.Join(imageDirectory, pick.Name()))
 	if err != nil {
-		log.Panic(err)
+		return err
 	}
+	sendFile(s, m, pick.Name(), file)
+	return nil
+}
+
+func sendFile(s *discordgo.Session, m *discordgo.Message, name string, file *os.File) {
 	discordFile := discordgo.File{
-		Name:        pick.Name(),
-		ContentType: "image/" + filepath.Ext(pick.Name()),
+		Name:        name,
+		ContentType: "image/" + filepath.Ext(name),
 		Reader:      file,
 	}
 	var files = []*discordgo.File{&discordFile}
@@ -98,26 +133,165 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		m.ChannelID,
 		&data,
 	)
-	return
+}
+
+func center(s *discordgo.Session, m *discordgo.Message) error {
+	urls := grabUrlsOfMessage(m.ReferencedMessage)
+	if len(urls) == 0 {
+		msgs, err := s.ChannelMessages(m.ChannelID, 50, "", "", "")
+		if err != nil {
+			return err
+		}
+		for _, msg := range msgs {
+			urls = grabUrlsOfMessage(msg)
+			if len(urls) != 0 {
+				break
+			}
+		}
+		if len(urls) == 0 {
+			return nil
+		}
+	}
+	file, err := os.CreateTemp(os.TempDir(), "*"+path.Base(urls[0]))
+	if err != nil {
+		return err
+	}
+	err = downloadFile(urls[0], file.Name())
+	if err != nil {
+		return err
+	}
+	context := context.TODO()
+	cfg, err := config.LoadDefaultConfig(context)
+	if err != nil {
+		return err
+	}
+	readFile, err := os.ReadFile(file.Name())
+	if err != nil {
+		return err
+	}
+	svc := rekognition.NewFromConfig(cfg)
+	input := &rekognition.DetectFacesInput{
+		Image: &types.Image{
+			Bytes: readFile,
+		},
+	}
+
+	result, err := svc.DetectFaces(context, input)
+
+	if err != nil {
+		return err
+	}
+
+	buffer, err := bimg.Read(file.Name())
+	if err != nil {
+		return err
+	}
+	image := bimg.NewImage(buffer)
+	size, err := image.Size()
+	if err != nil {
+		return err
+	}
+	var originalHeight = size.Height
+	var originalWidth = size.Width
+	var firstNoseCoordinateX int
+	var firstNoseCoordinateY int
+	var newAnchorX int
+	var newAnchorY int
+	var newHeight int
+	var newWidth int
+
+	for _, d := range result.FaceDetails {
+		for _, landmark := range d.Landmarks {
+			if landmark.Type == "nose" {
+				firstNoseCoordinateX = int(*landmark.X * float32(originalWidth))
+				firstNoseCoordinateY = int(*landmark.Y * float32(originalHeight))
+				newWidth = originalWidth - firstNoseCoordinateX
+				if firstNoseCoordinateX*2 < originalWidth {
+					newWidth = firstNoseCoordinateX * 2
+					newAnchorX = 0
+				} else {
+					newWidth = (originalWidth - firstNoseCoordinateX) * 2
+					newAnchorX = originalWidth - newWidth
+				}
+				if firstNoseCoordinateY*2 < originalHeight {
+					newHeight = firstNoseCoordinateY * 2
+					newAnchorY = 0
+				} else {
+					newHeight = (originalHeight - firstNoseCoordinateY) * 2
+					newAnchorY = originalHeight - newHeight
+				}
+				break
+			}
+		}
+	}
+	resizedData, err := image.Extract(newAnchorY, newAnchorX, newWidth, newHeight)
+	if err != nil {
+		return err
+	}
+	err = os.WriteFile(file.Name(), resizedData, 0777)
+	if err != nil {
+		return err
+	}
+	sendFile(s, m, file.Name(), file)
+	return nil
+}
+
+func grabUrlsOfMessage(m *discordgo.Message) []string {
+	if m == nil {
+		return []string{}
+	}
+	var urls []string
+	for _, embed := range m.Embeds {
+		urls = append(urls, embed.URL)
+	}
+	for _, embed := range m.Attachments {
+		urls = append(urls, embed.URL)
+	}
+	return urls
 }
 
 var randSource = rand.NewSource(time.Now().UnixNano())
 var rand1 = rand.New(randSource)
 
-func pickRandomFile(dir string) os.DirEntry {
+func pickRandomFile(dir string) (os.DirEntry, error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 	var all []os.DirEntry
 	for _, file := range files {
-		fmt.Println(file.Name(), file.IsDir())
 		if !file.IsDir() {
 			all = append(all, file)
 		}
 	}
 	randomIndex := rand1.Intn(len(all))
 	pick := all[randomIndex]
-	println(pick)
-	return pick
+	return pick, nil
+}
+
+func downloadFile(URL, fileName string) error {
+	//Get the response bytes from the url
+	response, err := http.Get(URL)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != 200 {
+		return errors.New("received non 200 response code")
+	}
+	//Create a empty file
+	file, err := os.Create(fileName)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	//Write the bytes to the file
+	_, err = io.Copy(file, response.Body)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
