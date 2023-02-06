@@ -67,6 +67,7 @@ func messageCreate(s *discordgo.Session, mc *discordgo.MessageCreate) {
 	}
 
 	if m.Content == "&center" {
+		log.Println("Received center message")
 		err := center(s, m)
 		if err != nil {
 			s.ChannelMessage(m.ChannelID, "Failed to center image")
@@ -76,6 +77,7 @@ func messageCreate(s *discordgo.Session, mc *discordgo.MessageCreate) {
 
 	subDirectory := determineSubdirectory(m)
 	if subDirectory != "" {
+		log.Println("Received image request: " + subDirectory)
 		err := sendImage(s, m, subDirectory)
 		if err != nil {
 			s.ChannelMessage(m.ChannelID, "Failed to send image")
