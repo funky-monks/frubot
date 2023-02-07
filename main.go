@@ -75,11 +75,13 @@ func messageCreate(s *discordgo.Session, mc *discordgo.MessageCreate) {
 		log.Println("Received center message")
 		err := center(s, m)
 		if err != nil {
+			if err != nil {
+				log.Println(err.Error())
+			}
 			_, err := s.ChannelMessageSend(m.ChannelID, "Failed to center image")
 			if err != nil {
 				log.Println(err.Error())
 			}
-			log.Println(err.Error())
 		}
 		return
 	}
@@ -198,17 +200,14 @@ func center(s *discordgo.Session, m *discordgo.Message) error {
 		return err
 	}
 	svc := rekognition.NewFromConfig(cfg)
-	if svc == nil {
-		return errors.New("failed to set up recognition client")
-	}
-	inputImg := types.Image{
-		Bytes: readFile,
-	}
-	input := rekognition.DetectFacesInput{
-		Image: &inputImg,
+
+	input := &rekognition.DetectFacesInput{
+		Image: &types.Image{
+			Bytes: readFile,
+		},
 	}
 	log.Println("Detecting faces for url " + selectedUrl)
-	result, err := svc.DetectFaces(ctx, &input)
+	result, err := svc.DetectFaces(ctx, input)
 	if err != nil {
 		return err
 	}
