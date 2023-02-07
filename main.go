@@ -201,13 +201,14 @@ func center(s *discordgo.Session, m *discordgo.Message) error {
 	if svc == nil {
 		return errors.New("failed to set up recognition client")
 	}
-	input := &rekognition.DetectFacesInput{
-		Image: &types.Image{
-			Bytes: readFile,
-		},
+	inputImg := types.Image{
+		Bytes: readFile,
+	}
+	input := rekognition.DetectFacesInput{
+		Image: &inputImg,
 	}
 	log.Println("Detecting faces for url " + selectedUrl)
-	result, err := svc.DetectFaces(ctx, input)
+	result, err := svc.DetectFaces(ctx, &input)
 	if err != nil {
 		return err
 	}
