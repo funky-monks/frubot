@@ -18,6 +18,7 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -71,7 +72,11 @@ func messageCreate(s *discordgo.Session, mc *discordgo.MessageCreate) {
 		log.Println("Received center message")
 		err := center(s, m)
 		if err != nil {
-			s.ChannelMessage(m.ChannelID, "Failed to center image")
+			_, err := s.ChannelMessage(m.ChannelID, "Failed to center image")
+			if err != nil {
+				log.Println(err.Error())
+			}
+			log.Println(err.Error())
 		}
 		return
 	}
@@ -141,6 +146,7 @@ func sendFile(s *discordgo.Session, m *discordgo.Message, name string, file *os.
 func center(s *discordgo.Session, m *discordgo.Message) error {
 	urls := grabUrlsOfMessage(m.ReferencedMessage)
 	if len(urls) == 0 {
+		log.Println("Found no urls. Scanning message history")
 		msgs, err := s.ChannelMessages(m.ChannelID, 50, "", "", "")
 		if err != nil {
 			return err
@@ -148,12 +154,16 @@ func center(s *discordgo.Session, m *discordgo.Message) error {
 		for _, msg := range msgs {
 			urls = grabUrlsOfMessage(msg)
 			if len(urls) != 0 {
+				log.Println("Found urls " + strings.Join(urls, ", "))
 				break
 			}
 		}
 		if len(urls) == 0 {
+			log.Println("Found no suitable URL in message history.")
 			return nil
 		}
+	} else {
+		log.Println("Found urls " + strings.Join(urls, ", "))
 	}
 	file, err := os.CreateTemp(os.TempDir(), "*"+path.Base(urls[0]))
 	if err != nil {
@@ -163,12 +173,15 @@ func center(s *discordgo.Session, m *discordgo.Message) error {
 	if err != nil {
 		return err
 	}
-	context := context.TODO()
-	cfg, err := config.LoadDefaultConfig(context)
 	if err != nil {
 		return err
 	}
 	readFile, err := os.ReadFile(file.Name())
+	if err != nil {
+		return err
+	}
+	ctx := context.TODO()
+	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return err
 	}
@@ -178,13 +191,10 @@ func center(s *discordgo.Session, m *discordgo.Message) error {
 			Bytes: readFile,
 		},
 	}
-
-	result, err := svc.DetectFaces(context, input)
-
+	result, err := svc.DetectFaces(ctx, input)
 	if err != nil {
 		return err
 	}
-
 	buffer, err := bimg.Read(file.Name())
 	if err != nil {
 		return err
