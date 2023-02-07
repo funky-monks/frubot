@@ -198,6 +198,9 @@ func center(s *discordgo.Session, m *discordgo.Message) error {
 		return err
 	}
 	svc := rekognition.NewFromConfig(cfg)
+	if svc == nil {
+		return errors.New("failed to set up recognition client")
+	}
 	input := &rekognition.DetectFacesInput{
 		Image: &types.Image{
 			Bytes: readFile,
