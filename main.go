@@ -59,7 +59,10 @@ func main() {
 	<-sc
 
 	// Cleanly close down the Discord session.
-	dg.Close()
+	err = dg.Close()
+	if err != nil {
+		log.Println(err.Error())
+	}
 }
 
 func messageCreate(s *discordgo.Session, mc *discordgo.MessageCreate) {
@@ -72,7 +75,7 @@ func messageCreate(s *discordgo.Session, mc *discordgo.MessageCreate) {
 		log.Println("Received center message")
 		err := center(s, m)
 		if err != nil {
-			_, err := s.ChannelMessage(m.ChannelID, "Failed to center image")
+			_, err := s.ChannelMessageSend(m.ChannelID, "Failed to center image")
 			if err != nil {
 				log.Println(err.Error())
 			}
@@ -86,7 +89,10 @@ func messageCreate(s *discordgo.Session, mc *discordgo.MessageCreate) {
 		log.Println("Received image request: " + subDirectory)
 		err := sendImage(s, m, subDirectory)
 		if err != nil {
-			s.ChannelMessage(m.ChannelID, "Failed to send image")
+			_, err := s.ChannelMessageSend(m.ChannelID, "Failed to send image")
+			if err != nil {
+				log.Println(err.Error())
+			}
 		}
 	}
 	return
@@ -137,10 +143,13 @@ func sendFile(s *discordgo.Session, m *discordgo.Message, name string, file *os.
 	data := discordgo.MessageSend{
 		Files: files,
 	}
-	s.ChannelMessageSendComplex(
+	_, err := s.ChannelMessageSendComplex(
 		m.ChannelID,
 		&data,
 	)
+	if err != nil {
+		log.Println(err.Error())
+	}
 }
 
 func center(s *discordgo.Session, m *discordgo.Message) error {
@@ -165,21 +174,24 @@ func center(s *discordgo.Session, m *discordgo.Message) error {
 	} else {
 		log.Println("Found urls " + strings.Join(urls, ", "))
 	}
-	file, err := os.CreateTemp(os.TempDir(), "*"+path.Base(urls[0]))
+	selectedUrl := urls[0]
+
+	log.Println("Creating temp file for url " + selectedUrl)
+	file, err := os.CreateTemp(os.TempDir(), "*"+path.Base(selectedUrl))
 	if err != nil {
 		return err
 	}
-	err = downloadFile(urls[0], file.Name())
+	log.Println("Created temp file " + file.Name() + " for url " + selectedUrl + ". Downloading file.")
+	err = downloadFile(selectedUrl, file.Name())
 	if err != nil {
 		return err
 	}
-	if err != nil {
-		return err
-	}
+	log.Println("Reading file " + file.Name() + " downloaded from url " + selectedUrl)
 	readFile, err := os.ReadFile(file.Name())
 	if err != nil {
 		return err
 	}
+	log.Println("Setting up Recognition client")
 	ctx := context.TODO()
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
@@ -191,10 +203,12 @@ func center(s *discordgo.Session, m *discordgo.Message) error {
 			Bytes: readFile,
 		},
 	}
+	log.Println("Detecting faces for url " + selectedUrl)
 	result, err := svc.DetectFaces(ctx, input)
 	if err != nil {
 		return err
 	}
+	log.Println("Allocating buffer for file " + file.Name() + " for url " + selectedUrl)
 	buffer, err := bimg.Read(file.Name())
 	if err != nil {
 		return err
@@ -216,6 +230,7 @@ func center(s *discordgo.Session, m *discordgo.Message) error {
 	for _, d := range result.FaceDetails {
 		for _, landmark := range d.Landmarks {
 			if landmark.Type == "nose" {
+				log.Println("Found nose for file " + file.Name() + " for url " + selectedUrl)
 				firstNoseCoordinateX = int(*landmark.X * float32(originalWidth))
 				firstNoseCoordinateY = int(*landmark.Y * float32(originalHeight))
 				newWidth = originalWidth - firstNoseCoordinateX
@@ -237,10 +252,12 @@ func center(s *discordgo.Session, m *discordgo.Message) error {
 			}
 		}
 	}
+	log.Println("Extracing image with new anchors for url " + selectedUrl)
 	resizedData, err := image.Extract(newAnchorY, newAnchorX, newWidth, newHeight)
 	if err != nil {
 		return err
 	}
+	log.Println("Writing resized image for url  " + selectedUrl)
 	err = os.WriteFile(file.Name(), resizedData, 0777)
 	if err != nil {
 		return err
@@ -288,7 +305,12 @@ func downloadFile(URL, fileName string) error {
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			log.Println(err.Error())
+		}
+	}(response.Body)
 
 	if response.StatusCode != 200 {
 		return errors.New("received non 200 response code")
@@ -298,7 +320,12 @@ func downloadFile(URL, fileName string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
+			log.Println(err.Error())
+		}
+	}(file)
 
 	//Write the bytes to the file
 	_, err = io.Copy(file, response.Body)
