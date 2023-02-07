@@ -6,7 +6,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.18.10
 	github.com/aws/aws-sdk-go-v2/service/rekognition v1.23.0
 	github.com/bwmarrin/discordgo v0.27.0
-	github.com/google/uuid v1.3.0
 	github.com/h2non/bimg v1.1.9
 )
 

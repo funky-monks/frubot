@@ -34,6 +34,7 @@ func init() {
 }
 
 func main() {
+	log.Println("Starting frubot")
 	dg, err := discordgo.New("Bot " + Token)
 	if err != nil {
 		fmt.Println("error creating Discord session,", err)
