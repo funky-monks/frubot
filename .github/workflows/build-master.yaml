@@ -1,0 +1,23 @@
+name: deploy-master
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  deploy-to-bots_funkymonks_xyz:
+    runs-on: ubuntu-latest
+    steps:
+
+    - uses: actions/checkout@v3
+
+    - name: Install Ansible
+      run: |
+        sudo apt update
+        sudo apt install software-properties-common
+        sudo add-apt-repository --yes --update ppa:ansible/ansible
+        sudo apt install ansible
+
+    - name: Run playbook
+      run: ansible-playbook ./.github/workflows/ansible/update.yml -i ./.github/workflows/ansible/inventory.yml
