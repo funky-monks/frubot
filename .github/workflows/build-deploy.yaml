@@ -1,9 +1,9 @@
-name: deploy-master
+name: build-deploy
 
 on:
   push:
     branches:
-      - master
+      - main
 
 jobs:
   deploy-to-bots_funkymonks_xyz:
